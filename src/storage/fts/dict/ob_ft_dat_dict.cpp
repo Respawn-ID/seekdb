@@ -254,9 +254,6 @@ int ObFTDATReader<DATA_TYPE>::match_with_hit(const ObString &ft_char,
   int ret = OB_SUCCESS;
   ObFTWordCode code;
   hit.set_unmatch();
-  auto *map = dat_->get_map();
-  int32_t *base = reinterpret_cast<int32_t *>(dat_->buff + dat_->base_offset_);
-  int32_t *check = reinterpret_cast<int32_t *>(dat_->buff + dat_->check_offset_);
 
   ObFTSingleWord word;
   word.set_word(ft_char.ptr(), ft_char.length());
@@ -265,32 +262,87 @@ int ObFTDATReader<DATA_TYPE>::match_with_hit(const ObString &ft_char,
     ret = OB_SUCCESS;
     hit.set_unmatch();
   } else {
-    if (&last_hit == &hit) {
-      // sameone
-    } else {
-      hit = last_hit;
-    }
-    if (0 == hit.base_idx_) {
-      hit.base_idx_ = 1; // from current to do check;
-    }
-    // from current place to do check
-    int32_t idx = abs(base[hit.base_idx_]) + code;
+    match_with_code(ft_char.length(), code, last_hit, hit);
+  }
+  return ret;
+}
 
-    if (check[idx] != hit.base_idx_) {
-      hit.set_unmatch();
-    } else if (base[idx] < 0) {
-      hit.base_idx_ = idx;
-      hit.end_pos_ = hit.end_pos_ + ft_char.length();
-      hit.char_cnt_++;
-      hit.set_match();
-      hit.set_prefix(); // to be checked next time
-    } else {
-      hit.base_idx_ = idx;
-      hit.end_pos_ = hit.end_pos_ + ft_char.length();
-      hit.char_cnt_++;
-      hit.set_prefix();
+template <typename DATA_TYPE>
+int ObFTDATReader<DATA_TYPE>::match_with_hit(FTDictMatchCache &cache,
+                                             const ObDATrieHit &last_hit,
+                                             ObDATrieHit &hit) const
+{
+  int ret = OB_SUCCESS;
+  ObFTWordCode code;
+  hit.set_unmatch();
+  if (OB_FAIL(cache.get_code(dat_, code)) && OB_ENTRY_NOT_EXIST != ret) {
+  } else if (OB_ENTRY_NOT_EXIST == ret) {
+    ret = OB_SUCCESS;
+    hit.set_unmatch();
+  } else {
+    match_with_code(cache.single_word().length(), code, last_hit, hit);
+  }
+  return ret;
+}
+
+template <typename DATA_TYPE>
+void ObFTDATReader<DATA_TYPE>::match_with_code(const int32_t char_len,
+                                               const ObFTWordCode code,
+                                               const ObDATrieHit &last_hit,
+                                               ObDATrieHit &hit) const
+{
+  int32_t *base = reinterpret_cast<int32_t *>(dat_->buff + dat_->base_offset_);
+  int32_t *check = reinterpret_cast<int32_t *>(dat_->buff + dat_->check_offset_);
+  if (&last_hit == &hit) {
+    // sameone
+  } else {
+    hit = last_hit;
+  }
+  if (0 == hit.base_idx_) {
+    hit.base_idx_ = 1; // from current to do check;
+  }
+  // from current place to do check
+  int32_t idx = abs(base[hit.base_idx_]) + code;
+
+  if (check[idx] != hit.base_idx_) {
+    hit.set_unmatch();
+  } else if (base[idx] < 0) {
+    hit.base_idx_ = idx;
+    hit.end_pos_ = hit.end_pos_ + char_len;
+    hit.char_cnt_++;
+    hit.set_match();
+    hit.set_prefix(); // to be checked next time
+  } else {
+    hit.base_idx_ = idx;
+    hit.end_pos_ = hit.end_pos_ + char_len;
+    hit.char_cnt_++;
+    hit.set_prefix();
+  }
+}
+
+int FTDictMatchCache::get_code(ObFTDAT *dat, ObFTWordCode &code)
+{
+  for (int64_t i = 0; i < code_count_; ++i) {
+    if (codes_[i].dat_ == dat) {
+      if (OB_SUCCESS == codes_[i].ret_) {
+        code = codes_[i].code_;
+      }
+      return codes_[i].ret_;
     }
   }
+
+  // Preserve the original reader's normalization, including its handling of set_word errors.
+  ObFTSingleWord word;
+  word.set_word(single_word_.ptr(), single_word_.length());
+  int ret = dat->get_map()->find(word, code);
+  const int64_t slot = code_count_ < CODE_CACHE_SIZE ? code_count_++ : next_code_;
+  codes_[slot].dat_ = dat;
+  codes_[slot].ret_ = ret;
+  if (OB_SUCCESS == ret) {
+    codes_[slot].code_ = code;
+  }
+  // A bounded cache may evict an entry; the next access simply repeats the original lookup.
+  next_code_ = (slot + 1) % CODE_CACHE_SIZE;
   return ret;
 }
 

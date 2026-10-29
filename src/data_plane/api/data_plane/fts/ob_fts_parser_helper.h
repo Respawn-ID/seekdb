@@ -161,6 +161,12 @@ public:
       common::ObIAllocator *allocator,
       const common::ObString &parser_name,
       const common::ObString &parser_properties);
+  // The caller must provide validated properties for this parser.
+  // Property values are copied; any referenced strings must outlive the helper.
+  int init(
+      common::ObIAllocator *allocator,
+      const ObFTParser &parser,
+      const ObFTParserProperty &parser_property);
   /**
    * Split document into multiple words
    *

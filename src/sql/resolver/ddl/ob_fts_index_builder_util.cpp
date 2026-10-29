@@ -22,6 +22,7 @@
 #include "data_plane/fts/dict/ob_gen_dic_loader.h"
 #include "data_plane/fts/dict/ob_dic_lock_service.h"
 #include "share/ob_server_struct.h"
+#include "lib/cpu/ob_cpu_topology.h"
 #include "data_plane/fts/ob_fts_parser_helper.h"
 #include "share/schema/ob_multi_version_schema_service.h"
 #include "share/schema/ob_schema_utils.h"
@@ -1031,6 +1032,15 @@ int ObFtsIndexBuilderUtil::generate_doc_id_column(
   return ret;
 }
 
+// Without an explicit DOP every fulltext aux table used to be built by a single PX worker, so
+// tokenizing, sorting and writing the whole table ran on one core. When no DOP is given, use
+// the configured CPU count, shared by the aux tables that are complemented at the same time.
+int64_t ObFtsIndexBuilderUtil::get_fts_auto_parallelism()
+{
+  const int64_t cpu_cnt = get_cpu_count();
+  return MIN(MAX(cpu_cnt / FTS_CONCURRENT_AUX_BUILD_CNT, 1L), FTS_MAX_AUTO_PARALLELISM);
+}
+
 int ObFtsIndexBuilderUtil::decide_parallelism(
     const share::schema::ObIndexType index_type,
     const int64_t original_parallelism,
@@ -1047,7 +1057,8 @@ int ObFtsIndexBuilderUtil::decide_parallelism(
       case share::schema::ObIndexType::INDEX_TYPE_DOC_ID_ROWKEY_LOCAL:
       case share::schema::ObIndexType::INDEX_TYPE_FTS_INDEX_LOCAL:
       case share::schema::ObIndexType::INDEX_TYPE_FTS_DOC_WORD_LOCAL:
-        decided_parallelism = MAX(original_parallelism / 3, 1L);
+        decided_parallelism = original_parallelism > 1 ? MAX(original_parallelism / 3, 1L)
+                                                       : get_fts_auto_parallelism();
         break;
       case share::schema::ObIndexType::INDEX_TYPE_NORMAL_MULTIVALUE_LOCAL:
       case share::schema::ObIndexType::INDEX_TYPE_UNIQUE_MULTIVALUE_LOCAL:

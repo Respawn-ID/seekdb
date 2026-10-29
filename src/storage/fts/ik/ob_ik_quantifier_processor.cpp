@@ -51,7 +51,7 @@ int ObIKQuantifierProcessor::process_CN_number(TokenizeContext &ctx,
   bool is_cn_number = false;
 
   if (ObFTCharUtil::CharType::CHINESE == type
-      && OB_FAIL(ObFTCharUtil::check_cn_number(ctx.collation(), ch, char_len, is_cn_number))) {
+      && OB_FAIL(ObFTCharUtil::check_cn_number(ctx.charset_type(), ch, char_len, is_cn_number))) {
   } else if (start_ == -1 && end_ == -1) {
     if (is_cn_number) {
       start_ = ctx.get_cursor();
@@ -92,12 +92,13 @@ int ObIKQuantifierProcessor::process_CN_count(TokenizeContext &ctx,
 
   if (need_count_scan(ctx)) {
     if (ObFTCharUtil::CharType::CHINESE == type) {
+      FTDictMatchCache cache(ObString(char_len, ch));
       // handle existing
       if (!count_hits_.empty()) {
         for (ObDATrieHit &hit : count_hits_) {
           if (OB_FAIL(ret)) {
             break;
-          } else if (OB_FAIL(quan_dict_.match({char_len, ch}, hit))) {
+          } else if (OB_FAIL(quan_dict_.match(cache, hit))) {
           } else if (hit.is_match()) {
             if (OB_FAIL(ctx.add_token(ctx.fulltext(),
                                       hit.start_pos_,
@@ -127,7 +128,7 @@ int ObIKQuantifierProcessor::process_CN_count(TokenizeContext &ctx,
         // find dict
 
         ObDATrieHit hit(&quan_dict_, ctx.get_cursor());
-        if (OB_FAIL(quan_dict_.match({char_len, ch}, hit))) {
+        if (OB_FAIL(quan_dict_.match(cache, hit))) {
         } else if (hit.is_match()) {
           if (OB_FAIL(ctx.add_token(ctx.fulltext(),
                                     hit.start_pos_,

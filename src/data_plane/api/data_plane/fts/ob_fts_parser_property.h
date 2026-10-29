@@ -137,6 +137,10 @@ public:
   ObFTParserProperty();
   ~ObFTParserProperty() = default;
   int parse_for_parser_helper(const ObFTParser &parser, const ObString &json_str);
+  // Extract validated, rebuilt properties. No strings borrow from props.
+  int parse_for_parser_helper(const ObFTParser &parser, const ObFTParserJsonProps &props);
+  // Equivalent to rebuilding empty DDL properties and parsing the formatted result.
+  int init_default_for_parser(const ObFTParser &parser);
 
   bool is_equal(const ObFTParserProperty &other) const
   {

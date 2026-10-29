@@ -76,6 +76,18 @@ int ObFTCacheDict::match_with_hit(const ObString &single_word,
   return reader_.match_with_hit(single_word, last_hit, hit);
 }
 
+int ObFTCacheDict::match(FTDictMatchCache &cache, ObDATrieHit &hit) const
+{
+  return reader_.match_with_hit(cache, hit, hit);
+}
+
+int ObFTCacheDict::match_with_hit(FTDictMatchCache &cache,
+                                  const ObDATrieHit &last_hit,
+                                  ObDATrieHit &hit) const
+{
+  return reader_.match_with_hit(cache, last_hit, hit);
+}
+
 int ObFTCacheDict::make_and_fetch_cache_entry(const ObFTDictDesc &desc,
                                               ObFTDAT *dat_buff,
                                               const size_t buff_size,

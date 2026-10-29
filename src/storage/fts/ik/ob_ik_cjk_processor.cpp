@@ -37,12 +37,13 @@ int ObIKCJKProcessor::do_process(TokenizeContext &ctx,
   int ret = OB_SUCCESS;
 
   if (ObFTCharUtil::CharType::USELESS != type) {
+    FTDictMatchCache cache(ObString(char_len, ch));
     // handle previous hits_ first and then check from this char
     for (ObList<ObDATrieHit, ObIAllocator>::iterator iter = hits_.begin();
          OB_SUCC(ret) && iter != hits_.end();
          iter++) {
       ObDATrieHit &hit = *iter;
-      if (OB_FAIL(dict_main_.match_with_hit({char_len, ch}, hit, hit))) {
+      if (OB_FAIL(dict_main_.match_with_hit(cache, hit, hit))) {
       } else if (hit.is_match()) {
         if (OB_FAIL(ctx.add_token(ctx.fulltext(),
                                   hit.start_pos_,
@@ -64,7 +65,7 @@ int ObIKCJKProcessor::do_process(TokenizeContext &ctx,
       // Start from this char
       // find range of dict
       ObDATrieHit hit(&dict_main_, ctx.get_cursor());
-      if (OB_FAIL(dict_main_.match({char_len, ch}, hit))) {
+      if (OB_FAIL(dict_main_.match(cache, hit))) {
       } else if (hit.is_match()) {
         // output token
         hits_.push_back(hit);

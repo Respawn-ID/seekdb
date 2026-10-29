@@ -17,12 +17,48 @@
 #ifndef _OCEANBASE_STORAGE_FTS_DICT_OB_FT_DICT_H_
 #define _OCEANBASE_STORAGE_FTS_DICT_OB_FT_DICT_H_
 
+#include "lib/ob_errno.h"
 #include "lib/string/ob_string.h"
+#include "storage/fts/dict/ob_ft_dict_def.h"
 
 namespace oceanbase
 {
 namespace storage
 {
+class ObIFTDict;
+struct ObFTDAT;
+
+// Stack-local cache for one character. Never store mutable lookup state in a shared dict.
+class FTDictMatchCache final
+{
+public:
+  explicit FTDictMatchCache(const ObString &single_word)
+      : single_word_(single_word), code_count_(0), next_code_(0),
+        range_owner_(nullptr), range_dict_(nullptr), range_ret_(OB_SUCCESS)
+  {}
+
+  const ObString &single_word() const { return single_word_; }
+  int get_code(ObFTDAT *dat, ObFTWordCode &code);
+
+private:
+  struct CodeEntry
+  {
+    ObFTDAT *dat_;
+    ObFTWordCode code_;
+    int ret_;
+  };
+  static constexpr int64_t CODE_CACHE_SIZE = 4;
+  const ObString single_word_;
+  CodeEntry codes_[CODE_CACHE_SIZE];
+  int64_t code_count_;
+  int64_t next_code_;
+  const ObIFTDict *range_owner_;
+  ObIFTDict *range_dict_;
+  int range_ret_;
+
+  friend class ObFTRangeDict;
+};
+
 /**
  * @class ObDATrieHit
  * @brief Record the matching path in a Double-Array-Trie and some info.
@@ -31,7 +67,6 @@ namespace storage
  * - It goes word by word;
  * - Word means a single character in a language;
  */
-class ObIFTDict;
 class ObDATrieHit final
 {
 public:
@@ -123,6 +158,18 @@ public:
   virtual int match_with_hit(const ObString &single_word,
                              const ObDATrieHit &last_hit,
                              ObDATrieHit &hit) const = 0;
+
+  // Reuse character lookups without changing the dispatch of either matching operation.
+  virtual int match(FTDictMatchCache &cache, ObDATrieHit &hit) const
+  {
+    return match(cache.single_word(), hit);
+  }
+  virtual int match_with_hit(FTDictMatchCache &cache,
+                             const ObDATrieHit &last_hit,
+                             ObDATrieHit &hit) const
+  {
+    return match_with_hit(cache.single_word(), last_hit, hit);
+  }
 };
 
 } // namespace storage

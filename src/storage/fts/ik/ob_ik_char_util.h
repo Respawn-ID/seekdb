@@ -52,7 +52,24 @@ public:
                                  const uint8_t char_len,
                                  CharType &type);
 
+  // Same as classify_first_char() above, with the charset already resolved by the caller.
+  static int classify_first_char(ObCharsetType cs_type,
+                                 const char *input,
+                                 const uint8_t char_len,
+                                 CharType &type);
+
+  // Same as ObCharset::first_valid_char(), with the charset already resolved by the caller.
+  // Used by the per-character loops of the IK tokenizer.
+  static int first_valid_char(const ObCharsetInfo *cs,
+                              const char *buf,
+                              const int64_t buf_size,
+                              int64_t &char_len);
+
   static int check_cn_number(ObCollationType coll_type,
+                             const char *input,
+                             const uint8_t char_len,
+                             bool &is_cn_number);
+  static int check_cn_number(ObCharsetType cs_type,
                              const char *input,
                              const uint8_t char_len,
                              bool &is_cn_number);
@@ -61,8 +78,16 @@ public:
                                  const char *input,
                                  const uint8_t char_len,
                                  bool &is_connector);
+  static int check_num_connector(ObCharsetType cs_type,
+                                 const char *input,
+                                 const uint8_t char_len,
+                                 bool &is_connector);
 
   static int check_letter_connector(ObCollationType coll_type,
+                                    const char *input,
+                                    const uint8_t char_len,
+                                    bool &is_connector);
+  static int check_letter_connector(ObCharsetType cs_type,
                                     const char *input,
                                     const uint8_t char_len,
                                     bool &is_connector);
@@ -319,7 +344,46 @@ ObFTCharUtil::is_cn_number(const char *input, const uint8_t char_len, bool &is_c
   ob_wc_t unicode = 0;
   if (OB_FAIL(decode_unicode<CS_TYPE>(input, char_len, unicode))) {
   } else {
-    is_cn_number = ObUnicodeBlockUtils::is_unicode_cn_number(unicode);
+    // Same set as ObUnicodeBlockUtils::is_unicode_cn_number(), with the duplicate 拾 removed.
+    switch (unicode) {
+    case 0x4E00: // 一
+    case 0x4E8C: // 二
+    case 0x4E24: // 两
+    case 0x4E09: // 三
+    case 0x56DB: // 四
+    case 0x4E94: // 五
+    case 0x516D: // 六
+    case 0x4E03: // 七
+    case 0x516B: // 八
+    case 0x4E5D: // 九
+    case 0x5341: // 十
+    case 0x96F6: // 零
+    case 0x58F9: // 壹
+    case 0x8D30: // 贰
+    case 0x53C1: // 叁
+    case 0x8086: // 肆
+    case 0x4F0D: // 伍
+    case 0x9646: // 陆
+    case 0x67D2: // 柒
+    case 0x634C: // 捌
+    case 0x7396: // 玖
+    case 0x62FE: // 拾
+    case 0x767E: // 百
+    case 0x5343: // 千
+    case 0x4E07: // 万
+    case 0x4EBF: // 亿
+    case 0x4F70: // 佰
+    case 0x4EDF: // 仟
+    case 0x842C: // 萬
+    case 0x5104: // 億
+    case 0x5146: // 兆
+    case 0x5345: // 卅
+    case 0x5EFF: // 廿
+      is_cn_number = true;
+      break;
+    default:
+      is_cn_number = false;
+    }
   }
   return ret;
 }
@@ -363,8 +427,15 @@ inline int ObFTCharUtil::check_cn_number(ObCollationType coll_type,
                                          const uint8_t char_len,
                                          bool &is_cn_number)
 {
+  return check_cn_number(ObCharset::charset_type_by_coll(coll_type), input, char_len, is_cn_number);
+}
+
+inline int ObFTCharUtil::check_cn_number(ObCharsetType cs_type,
+                                         const char *input,
+                                         const uint8_t char_len,
+                                         bool &is_cn_number)
+{
   int ret = OB_SUCCESS;
-  ObCharsetType cs_type = ObCharset::charset_type_by_coll(coll_type);
 
   switch (cs_type) {
   case CHARSET_UTF8MB4: {
@@ -383,8 +454,15 @@ inline int ObFTCharUtil::check_num_connector(ObCollationType coll_type,
                                              const uint8_t char_len,
                                              bool &is_connector)
 {
+  return check_num_connector(ObCharset::charset_type_by_coll(coll_type), input, char_len, is_connector);
+}
+
+inline int ObFTCharUtil::check_num_connector(ObCharsetType cs_type,
+                                             const char *input,
+                                             const uint8_t char_len,
+                                             bool &is_connector)
+{
   int ret = OB_SUCCESS;
-  ObCharsetType cs_type = ObCharset::charset_type_by_coll(coll_type);
 
   switch (cs_type) {
   case CHARSET_UTF8MB4: {
@@ -403,8 +481,15 @@ inline int ObFTCharUtil::check_letter_connector(ObCollationType coll_type,
                                                 const uint8_t char_len,
                                                 bool &is_connector)
 {
+  return check_letter_connector(ObCharset::charset_type_by_coll(coll_type), input, char_len, is_connector);
+}
+
+inline int ObFTCharUtil::check_letter_connector(ObCharsetType cs_type,
+                                                const char *input,
+                                                const uint8_t char_len,
+                                                bool &is_connector)
+{
   int ret = OB_SUCCESS;
-  ObCharsetType cs_type = ObCharset::charset_type_by_coll(coll_type);
 
   switch (cs_type) {
   case CHARSET_UTF8MB4: {
@@ -475,8 +560,40 @@ inline int ObFTCharUtil::classify_first_char(ObCollationType coll_type,
                                              const uint8_t char_len,
                                              CharType &type)
 {
+  return classify_first_char(ObCharset::charset_type_by_coll(coll_type), input, char_len, type);
+}
+
+inline int ObFTCharUtil::first_valid_char(const ObCharsetInfo *cs,
+                                          const char *buf,
+                                          const int64_t buf_size,
+                                          int64_t &char_len)
+{
   int ret = OB_SUCCESS;
-  ObCharsetType cs_type = ObCharset::charset_type_by_coll(coll_type);
+  if (OB_ISNULL(cs) || OB_ISNULL(cs->cset)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_UNLIKELY(NULL == buf)) {
+    ret = OB_NOT_INIT;
+  } else if (buf_size <= 0) {
+    char_len = 0;
+  } else {
+    int error = 0;
+    const int64_t len = static_cast<int64_t>(cs->cset->well_formed_len(cs, buf, buf + buf_size, 1, &error));
+    if (OB_LIKELY(0 == error)) {
+      char_len = len;
+    } else {
+      ret = OB_INVALID_ARGUMENT;
+      STORAGE_FTS_LOG(WARN, "invalid encoding found", K(ret));
+    }
+  }
+  return ret;
+}
+
+inline int ObFTCharUtil::classify_first_char(ObCharsetType cs_type,
+                                             const char *input,
+                                             const uint8_t char_len,
+                                             CharType &type)
+{
+  int ret = OB_SUCCESS;
 
   switch (cs_type) {
   case CHARSET_UTF8MB4: {

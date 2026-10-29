@@ -12046,6 +12046,7 @@ int ObLogPlan::prepare_text_retrieval_scan(const ObIArray<ObRawExpr *> &scan_mat
     }
     if (OB_FAIL(table_scan->set_is_skip_rowkey_doc(tr_info.doc_id_idx_tid_ == OB_INVALID_ID))) {
     } else if (OB_FAIL(table_scan->set_is_skip_rowkey_doc(tr_info.rowkey_idx_tid_ == OB_INVALID_ID))) {
+    } else if (OB_FAIL(check_need_calc_match_score(match_against, tr_info.need_calc_relevance_))) {
     }
   }
 
@@ -12162,6 +12163,54 @@ int ObLogPlan::prepare_text_retrieval_merge(const ObIArray<ObRawExpr *> &merge_m
       table_scan->set_rowkey_doc_table_id(rowkey_idx_tid);
     }
     if (OB_FAIL(table_scan->set_is_skip_rowkey_doc(doc_rowkey_tid == OB_INVALID_ID))) {
+    }
+  }
+  return ret;
+}
+
+// A natural language MATCH used only as a boolean filter selects exactly the documents that
+// contain at least one query token: BM25 is floored at a positive epsilon, so the score of a
+// matched document is always greater than zero. In that case the relevance statistics (token
+// document frequency, total document count, document length) do not need to be scanned.
+// The score is still required whenever the match expr is projected, sorted on, grouped on, or
+// used in any condition other than a plain truth test.
+int ObLogPlan::check_need_calc_match_score(ObMatchFunRawExpr *match_against, bool &need_calc)
+{
+  int ret = OB_SUCCESS;
+  const ObDMLStmt *stmt = get_stmt();
+  need_calc = true;
+  if (OB_ISNULL(match_against) || OB_ISNULL(stmt)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (match_against->is_es_match() ||
+             NATURAL_LANGUAGE_MODE != match_against->get_mode_flag() ||
+             !stmt->is_select_stmt()) {
+    // keep the score
+  } else {
+    ObSEArray<ObRawExpr *, 16> other_exprs;
+    ObStmtExprGetter visitor;
+    visitor.set_relation_scope();
+    visitor.remove_scope(SCOPE_WHERE);
+    bool used_as_value = false;
+    if (OB_FAIL(stmt->get_relation_exprs(other_exprs, visitor))) {
+    } else if (ObOptimizerUtil::is_sub_expr(match_against, other_exprs)) {
+      used_as_value = true;
+    }
+    const ObIArray<ObRawExpr *> &conds = stmt->get_condition_exprs();
+    for (int64_t i = 0; OB_SUCC(ret) && !used_as_value && i < conds.count(); ++i) {
+      const ObRawExpr *cond = conds.at(i);
+      if (OB_ISNULL(cond)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (cond == match_against) {
+        // WHERE MATCH(...) AGAINST(...) is a truth test of the score
+      } else if (T_OP_BOOL == cond->get_expr_type() && 1 == cond->get_param_count() &&
+                 cond->get_param_expr(0) == match_against) {
+        // same truth test, wrapped by the mysql boolean conversion
+      } else if (ObOptimizerUtil::is_sub_expr(match_against, cond)) {
+        used_as_value = true;
+      }
+    }
+    if (OB_SUCC(ret) && !used_as_value) {
+      need_calc = false;
     }
   }
   return ret;

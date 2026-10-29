@@ -378,19 +378,57 @@ int ObFTRangeDict::match_with_hit(const ObString &single_word,
   return last_hit.dict_->match_with_hit(single_word, last_hit, hit);
 }
 
+int ObFTRangeDict::match(FTDictMatchCache &cache, ObDATrieHit &hit) const
+{
+  int ret = OB_SUCCESS;
+  if (cache.range_owner_ != this) {
+    cache.range_dict_ = nullptr;
+    cache.range_ret_ = find_first_char_range(cache.single_word(), cache.range_dict_);
+    cache.range_owner_ = this;
+  }
+  if (OB_FAIL(cache.range_ret_) && OB_ENTRY_NOT_EXIST != ret) {
+  } else if (OB_ENTRY_NOT_EXIST == ret) {
+    hit.set_unmatch();
+    ret = OB_SUCCESS;
+  } else {
+    hit.dict_ = cache.range_dict_;
+    if (OB_FAIL(cache.range_dict_->match(cache, hit))) {
+    }
+  }
+  return ret;
+}
+
+int ObFTRangeDict::match_with_hit(FTDictMatchCache &cache,
+                                  const ObDATrieHit &last_hit,
+                                  ObDATrieHit &hit) const
+{
+  return last_hit.dict_->match_with_hit(cache, last_hit, hit);
+}
+
+// Same ordering as ObCharset::strcmp(CS_TYPE_UTF8MB4_BIN, l, r) (memcmp, then length), without
+// the per-call collation lookup and argument checks. It runs for every character tokenized.
+static OB_INLINE int utf8mb4_bin_cmp(const ObString &l, const ObString &r)
+{
+  int cmp = 0;
+  if (l.empty() || r.empty()) {
+    cmp = l.empty() ? (r.empty() ? 0 : -1) : 1;
+  } else {
+    const int32_t min_len = MIN(l.length(), r.length());
+    cmp = MEMCMP(l.ptr(), r.ptr(), min_len);
+    if (0 == cmp) {
+      cmp = l.length() - r.length();
+    }
+  }
+  return cmp;
+}
+
 int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict *&dict) const
 {
   int ret = OB_SUCCESS;
   bool found = false;
   for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
-    if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                          range_dicts_[i].start_.get_word(),
-                          single_word)
-            <= 0
-        && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                             range_dicts_[i].end_.get_word(),
-                             single_word)
-               >= 0) {
+    if (utf8mb4_bin_cmp(range_dicts_[i].start_.get_word(), single_word) <= 0
+        && utf8mb4_bin_cmp(range_dicts_[i].end_.get_word(), single_word) >= 0) {
       dict = range_dicts_[i].dict_;
       found = true;
     }

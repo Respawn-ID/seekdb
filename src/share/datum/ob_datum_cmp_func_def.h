@@ -387,7 +387,24 @@ struct ObDatumStrCmp : public ObDefined<SupportedCollection<CS_TYPE>::defined_>
 {
   inline static int cmp(const ObDatum &l, const ObDatum &r, int &cmp_ret)
   {
-    return ObDatumStrCmpImpl::cmp(l, r, cmp_ret, CS_TYPE, WITH_END_SPACE);
+    // Datum lengths are unsigned. Keep the wrapper's validation for bad pointers
+    // and unsupported collations, including its diagnostics and return value.
+    if (OB_UNLIKELY(!SupportedCollection<CS_TYPE>::defined_
+                    || (nullptr == l.ptr_ && 0 != l.len_)
+                    || (nullptr == r.ptr_ && 0 != r.len_))) {
+      return ObDatumStrCmpImpl::cmp(l, r, cmp_ret, CS_TYPE, WITH_END_SPACE);
+    }
+    // get_charset performs any required lazy initialization. Charset objects
+    // have static lifetime, so subsequent comparisons can use the handler directly.
+    static const ObCharsetInfo *const cs = ObCharset::get_charset(CS_TYPE);
+    if (OB_ISNULL(cs)) {
+      return ObDatumStrCmpImpl::cmp(l, r, cmp_ret, CS_TYPE, WITH_END_SPACE);
+    }
+    cmp_ret = cs->coll->strnncollsp(cs,
+        reinterpret_cast<const unsigned char *>(l.ptr_), l.len_,
+        reinterpret_cast<const unsigned char *>(r.ptr_), r.len_, WITH_END_SPACE);
+    cmp_ret = cmp_ret > 0 ? 1 : (cmp_ret < 0 ? -1 : 0);
+    return OB_SUCCESS;
   }
 };
 

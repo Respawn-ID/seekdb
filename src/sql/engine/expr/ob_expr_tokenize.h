@@ -21,7 +21,7 @@
 #include "lib/allocator/page_arena.h"
 #include "lib/string/ob_string.h"
 #include "sql/engine/expr/ob_expr_operator.h"
-#include "data_plane/fts/ob_fts_parser_property.h"
+#include "data_plane/fts/ob_fts_parser_helper.h"
 
 namespace oceanbase
 {
@@ -58,19 +58,22 @@ private:
     static constexpr const char *ADDITIONAL_ARGS_STR = "additional_args";
 
   public:
-    TokenizeParam();
+    explicit TokenizeParam(common::ObIAllocator &allocator);
 
     int parse_json_param(const ObIJsonBase *obj);
 
-    // check and reform parser properties to standard format
+    // Validate and convert parser properties to the helper's runtime representation.
     int reform_parser_properties(const ObString &properties);
     int try_load_dictionary_for_ik();
 
   public:
     // for property and tmp json string
-    mutable ObArenaAllocator allocator_;
+    common::ObIAllocator &allocator_;
+    storage::ObFTParser parser_;
+    char parser_name_buf_[storage::OB_FT_PARSER_NAME_LENGTH];
     ObString parser_name_;
     ObString properties_;
+    storage::ObFTParserProperty parser_property_;
     ObObjMeta meta_;
     ObString fulltext_;
     enum OUTPUT_MODE
@@ -78,6 +81,9 @@ private:
       DEFAULT,
       ALL,
     } output_mode_;
+
+  private:
+    DISALLOW_COPY_AND_ASSIGN(TokenizeParam);
   };
 
 private:

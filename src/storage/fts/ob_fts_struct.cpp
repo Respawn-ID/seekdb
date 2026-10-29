@@ -25,10 +25,36 @@ namespace oceanbase
 namespace storage
 {
 
+namespace
+{
+common::ObDatumBasicFuncs *get_word_basic_funcs(const ObObjMeta &meta)
+{
+  struct CacheEntry
+  {
+    common::ObObjType type_;
+    common::ObCollationType collation_;
+    common::ObDatumBasicFuncs *funcs_;
+  };
+  // The four supported collations occupy distinct slots. Cache both the word
+  // and stopword function tables without enlarging map keys.
+  // The datum function tables have process lifetime; only the cache is mutable.
+  static thread_local CacheEntry cache[4] = {};
+  const common::ObObjType type = meta.get_type();
+  const common::ObCollationType collation = meta.get_collation_type();
+  CacheEntry &entry = cache[static_cast<uint64_t>(collation) % ARRAYSIZEOF(cache)];
+  if (OB_ISNULL(entry.funcs_) || entry.type_ != type || entry.collation_ != collation) {
+    entry.funcs_ = common::ObDatumFuncs::get_basic_func(type, collation);
+    entry.type_ = type;
+    entry.collation_ = collation;
+  }
+  return entry.funcs_;
+}
+} // namespace
+
 int ObFTWord::hash(uint64_t &hash_val) const
 {
   int ret = OB_SUCCESS;
-  common::ObDatumBasicFuncs *funcs = ObDatumFuncs::get_basic_func(meta_.get_type(), meta_.get_collation_type());
+  common::ObDatumBasicFuncs *funcs = get_word_basic_funcs(meta_);
   if (OB_ISNULL(funcs)) {
     ret = OB_ERR_UNEXPECTED;
   } else if (funcs->default_hash_ == nullptr) {
@@ -43,7 +69,10 @@ bool ObFTWord::operator==(const ObFTWord &other) const
   bool is_equal = false;
   int ret = OB_SUCCESS;
   int cmp_ret = 0;
-  ObDatumCmpFuncType func = get_datum_cmp_func(meta_, other.meta_);
+  // Equal types take the basic-function branch in get_datum_cmp_func().
+  ObDatumCmpFuncType func = meta_.get_type() == other.meta_.get_type()
+      ? get_word_basic_funcs(meta_)->null_first_cmp_
+      : get_datum_cmp_func(meta_, other.meta_);
   if (func == nullptr) {
     ob_abort();
   } else if (OB_FAIL(func(word_, other.word_, cmp_ret, nullptr))) {

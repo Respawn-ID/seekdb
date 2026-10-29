@@ -173,6 +173,15 @@ public:
   int match_with_hit(const ObString &single_word,
                      const ObDATrieHit &last_hit,
                      ObDATrieHit &hit) const;
+  int match_with_hit(FTDictMatchCache &cache,
+                     const ObDATrieHit &last_hit,
+                     ObDATrieHit &hit) const;
+
+private:
+  void match_with_code(const int32_t char_len,
+                       const ObFTWordCode code,
+                       const ObDATrieHit &last_hit,
+                       ObDATrieHit &hit) const;
 
 private:
   ObFTDAT *dat_;

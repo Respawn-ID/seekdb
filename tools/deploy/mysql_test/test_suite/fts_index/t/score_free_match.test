@@ -1,0 +1,82 @@
+# owner: fts
+# owner group: storage
+# description: results must not change when MATCH is evaluated without relevance scores,
+#              when a limited view is only counted, and when fulltext indexes are built in parallel
+
+--disable_warnings
+drop database if exists fts_score_free;
+create database fts_score_free;
+use fts_score_free;
+--enable_warnings
+
+create table docs (
+  id bigint auto_increment primary key,
+  category int not null,
+  title varchar(256) not null,
+  content text not null,
+  title_en varchar(256) not null,
+  content_en text not null
+) default charset = utf8mb4;
+
+insert into docs (category, title, content, title_en, content_en) values
+  (1, '数据库性能优化实践', '全文索引的分词器热路径优化包括解析器实例复用、停用词全局单例。', 'Full-text search indexing benchmark', 'The quick brown fox jumps over the lazy dog.'),
+  (2, '全文索引分词器热路径分析', '在大量文档索引场景下，ik 分词需要频繁查词典和判断停用词。', 'Tokenization hot path optimization', 'Completed the annual security audit. No major vulnerabilities were found.'),
+  (3, 'OceanBase 稳定性的工程经验', 'OceanBase 是一款非常稳定的数据库，支持 ik、beng、space、ngram 等多种内置分词器。', 'Database audit and security review', 'Database performance optimization focuses on index build and IO reduction.'),
+  (4, '倒排索引与检索系统设计', '倒排索引是全文检索的核心数据结构，分词质量直接影响召回率。', 'Inverted index build performance', 'Bulk loading documents triggers repeated tokenizer execution.'),
+  (5, '中文分词 ik 词典加载机制', '中华人民共和国人民大会堂是著名地标，本文用于测试中文分词差异。', 'English tokenizer beng parser test', 'English beng parser tokenization is used as a baseline.'),
+  (6, '搜索引擎召回率调优笔记', '性能优化需要结合 profile 数据定位热点，tokenizer 和 database 都很重要。', 'Query latency under heavy load', 'database performance audit under heavy load'),
+  (7, 'SQL 执行计划与索引选择', '与全文无关的普通文本。', 'Document retrieval relevance scoring', 'nothing relevant here'),
+  (8, '日志系统内存池化设计', '倒排索引 tokenizer 全文索引 分词器', 'Bulk insert throughput measurement', 'database database database');
+
+alter table docs add fulltext index fti_all_ik(title, content) with parser ik;
+alter table docs add fulltext index fti_content_ik(content) with parser ik;
+alter table docs add fulltext index fti_en_beng(title_en, content_en) with parser beng;
+
+--result_format 4
+
+# a MATCH used only as a filter does not need the relevance score
+explain select count(*) from docs where match(title, content) against('全文索引 分词器');
+select count(*) from docs where match(title, content) against('全文索引 分词器');
+select count(*) from docs where match(title, content) against('全文索引 分词器') > 0;
+select count(*) from docs where match(title_en, content_en) against('database performance audit');
+select count(*) from docs where match(title_en, content_en) against('database performance audit') > 0;
+select count(*) from docs where match(title, content) against('OceanBase 稳定 database');
+select id from docs where match(title, content) against('OceanBase 稳定 database') and category > 2 order by id;
+select category, count(*) from docs where match(content) against('倒排索引 tokenizer') group by category order by category;
+
+# the score is still computed when it is used
+explain select id, match(title, content) against('全文索引 分词器') as score from docs where match(title, content) against('全文索引 分词器');
+select id, round(match(title, content) against('全文索引 分词器'), 6) as score from docs where match(title, content) against('全文索引 分词器') order by id;
+select count(*) from docs where match(title_en, content_en) against('database performance audit') > 0.5;
+select id from docs where match(content) against('倒排索引 tokenizer') order by id;
+select id from docs where match(content) against('倒排索引 tokenizer');
+select id from docs where match(content) against('倒排索引 tokenizer') limit 2;
+select count(*) from docs where match(title, content) against('+全文索引 -分词器' in boolean mode);
+
+# a limited view whose rows are only counted keeps its size, whatever the order
+explain select count(*) from (select id from docs where match(content) against('倒排索引 tokenizer') limit 2) t;
+select count(*) from (select id from docs where match(content) against('倒排索引 tokenizer') limit 2) t;
+select count(*) from (select id from docs where match(content) against('倒排索引 tokenizer') limit 100) t;
+select count(*) from (select id from docs where match(content) against('倒排索引 tokenizer') limit 1, 2) t;
+select count(*) from (select id from docs order by id desc limit 3) t;
+# the parent reads the view rows, so the order must be kept
+select sum(id) from (select id from docs where match(content) against('倒排索引 tokenizer') limit 2) t;
+select max(id) from (select id from docs order by id desc limit 3) t;
+select count(*) from (select id from docs order by id desc limit 3) t where id > 6;
+
+# tokenize output must stay identical
+select tokenize('OceanBase是一款非常稳定的数据库，全文索引的分词器热路径优化包括解析器实例复用、停用词全局单例、内存池化数据结构等技术，在大量文档索引和查询场景下可以显著降低 CPU 开销。', 'ik');
+select tokenize('OceanBase是一款非常稳定的数据库，全文索引的分词器热路径优化包括解析器实例复用。', 'ik', '[{"additional_args":[{"ik_mode": "max_word"}]}]');
+select tokenize('三百二十五个苹果和12个梨，第3章 version2.0 中华人民共和国', 'ik');
+select tokenize('三百二十五个苹果和12个梨，第3章 version2.0 中华人民共和国', 'ik', '[{"additional_args":[{"ik_mode": "max_word"}]}]');
+select tokenize('The quick brown fox jumps over the lazy dog. Full-text search indexing requires efficient tokenization on the hot path.', 'beng');
+select tokenize('The the THE quick quick', 'beng', '[{"output": "all"}]');
+select tokenize('全文索引 全文索引 分词器', 'ik', '[{"output": "all"}]');
+select tokenize('hello world 全文索引', 'space');
+select tokenize('全文索引', 'ngram');
+
+# every document is found through each index after the (parallel) build
+select count(*) from docs where match(title, content) against('数据库 索引 分词 OceanBase 中文 系统 SQL 日志 检索 搜索');
+select count(*) from docs where match(title_en, content_en) against('the database index search tokenizer query bulk english full document');
+
+drop database fts_score_free;
